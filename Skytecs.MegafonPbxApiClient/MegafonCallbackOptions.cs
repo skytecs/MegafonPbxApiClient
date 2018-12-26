@@ -8,9 +8,6 @@ namespace Skytecs.MegafonPbxApiClient
     /// </summary>
     public class MegafonCallbackOptions
     {
-        public Uri CallbackEndpoint { get; set; }
-        public string CallbackToken { get; set; }
-
         /// <summary>
         /// Вызывается при получении команды history <see cref="IMegafonHistoryRequest"/>
         /// </summary>

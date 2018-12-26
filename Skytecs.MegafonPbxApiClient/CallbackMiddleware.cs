@@ -9,85 +9,82 @@ namespace Skytecs.MegafonPbxApiClient
 {
     class CallbackMiddleware
     {
-        private readonly RequestDelegate _next;
+        private readonly MegafonCallbackOptions _options;
+        private readonly ILogger<CallbackMiddleware> _logger;
 
-        public CallbackMiddleware(RequestDelegate next)
-        {
-            _next = next;
-        }
-
-        public async Task InvokeAsync(HttpContext context, 
-            MegafonCallbackOptions callback,
+        public CallbackMiddleware(MegafonCallbackOptions options,
             ILogger<CallbackMiddleware> logger = null)
         {
+            _options = options ?? throw new ArgumentNullException(nameof(options));
+            _logger = logger ?? new VoidLogger<CallbackMiddleware>();
+        }
 
-            if (callback == null)
+        public async Task InvokeAsync(HttpContext context, string callbackToken)
+        {
+
+            if (_options == null)
             {
-                throw new ArgumentNullException(nameof(callback));
+                throw new ArgumentNullException(nameof(_options));
             }
 
-
-            if (logger == null)
+            if (context == null)
             {
-                logger = new VoidLogger<CallbackMiddleware>();
+                throw new ArgumentNullException(nameof(context));
             }
 
-            if (PathString.FromUriComponent(callback.CallbackEndpoint) == context.Request.Path)
+            if (context.Request.Method != "POST")
             {
-                if (context.Request.Form["crm_token"] == callback.CallbackToken)
+                await SendResponse(context.Response, 400, "{ \"error\": \"Invalid request\" }");
+
+                return;
+            }
+
+            if(context.Request.Form["crm_token"] != callbackToken)
+            {
+                await SendResponse(context.Response, 401, "{ \"error\": \"Invalid token\" }");
+
+                return;
+            }
+
+            try
+            {
+                var requestForm = await context.Request.ReadFormAsync();
+
+                var cmd = requestForm["cmd"];
+
+                switch (cmd)
                 {
-                    try
-                    {
-                        var requestForm = await context.Request.ReadFormAsync();
+                    case "history":
+                        await _options.InvokeOnHistory(new HistoryRequest(requestForm));
+                        break;
+                    case "event":
+                        await _options.InvokeOnEvent(new EventRequest(requestForm));
+                        break;
+                    case "contact":
+                        var contact = await _options.InvokeOnContact(new ContactRequest(requestForm));
 
-                        var cmd = requestForm["cmd"];
-
-
-                        switch (cmd)
+                        if (contact == null)
                         {
-                            case "history":
-                                await callback.InvokeOnHistory(new HistoryRequest(requestForm));
-                                break;
-                            case "event":
-                                await callback.InvokeOnEvent(new EventRequest(requestForm));
-                                break;
-                            case "contact":
-                                var contact = await callback.InvokeOnContact(new ContactRequest(requestForm));
+                            await SendResponse(context.Response, 200, "{}");
+                        }
+                        else
+                        {
+                            var json = $"{{contact_name:\"{contact.ContactName}\", responsible:\"{contact.Responsible}\"}}";
+                            await SendResponse(context.Response, 200, json);
+                        }
 
-                                if(contact == null)
-                                {
-                                    await SendResponse(context.Response, 200, "{}");
-                                }
-                                else
-                                {
-                                    var json = $"{{contact_name:\"{contact.ContactName}\", responsible:\"{contact.Responsible}\"}}";
-                                    await SendResponse(context.Response, 200, json);
-                                }
-
-                                break;
-                            default:
-                                logger.LogError($"Unknown callback");
-                                break;
-                        };
-                    }
-                    catch(Exception e)
-                    {
-                        logger.LogError(e, e.Message);
-
-                        await SendResponse(context.Response, 400, "{ \"error\": \"Invalid parameters\" }");
-
-                    }
-                }
-                else
-                {
-                    await SendResponse(context.Response, 401, "{ \"error\": \"Invalid token\" }");
-                }
+                        break;
+                    default:
+                        _logger.LogError($"Unknown callback");
+                        break;
+                };
             }
-            else if (_next != null)
+            catch (Exception e)
             {
-                await _next.Invoke(context);
-            }
+                _logger.LogError(e, e.Message);
 
+                await SendResponse(context.Response, 400, "{ \"error\": \"Invalid parameters\" }");
+            }
         }
 
         private async Task SendResponse(HttpResponse response, int code, string json)

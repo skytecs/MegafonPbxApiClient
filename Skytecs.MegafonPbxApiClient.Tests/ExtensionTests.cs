@@ -16,7 +16,7 @@ namespace Skytecs.MegafonPbxApiClient.Tests
 
             MegafonApiOptions configuredOptions = null;
 
-            var newServices = MegafonClientExtensions.AddMegafon(services, options =>
+            var newServices = MegafonClientExtensions.AddMegafonApi(services, options =>
             {
                 configuredOptions = options;
             });
