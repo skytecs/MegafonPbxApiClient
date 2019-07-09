@@ -34,12 +34,12 @@ namespace Skytecs.MegafonPbxApiClient
             TelNum = requestForm["telnum"].SingleOrDefault();
             Phone = requestForm["phone"].Single();
             Diversion = requestForm["diversion"].SingleOrDefault();
-            Start = DateTime.Parse(requestForm["start"].Single(), new DateTimeFormatInfo { FullDateTimePattern = "YYYYmmddTHHMMSSZ" });
+            Start = DateTime.ParseExact(requestForm["start"].Single(), "yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
             Duration = int.Parse(requestForm["duration"].Single());
             CallId = requestForm["callid"].Single();
-            Link = requestForm["link"].Single();
+            Link = requestForm["link"].SingleOrDefault();
 
-            switch(requestForm["link"].Single().ToLowerInvariant())
+            switch(requestForm["status"].Single().ToLowerInvariant())
             {
                 case "success":
                     Status = MegafonCallResult.Success;

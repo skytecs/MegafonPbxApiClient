@@ -2,31 +2,26 @@
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace Skytecs.MegafonPbxApiClient
 {
-    class CallbackMiddleware
+    abstract class CallbackMiddleware<TOptions> : ICallbackMiddleware
     {
-        private readonly MegafonCallbackOptions _options;
-        private readonly ILogger<CallbackMiddleware> _logger;
+        private readonly ILogger<CallbackMiddleware<TOptions>> _logger;
+        private readonly TOptions _options;
 
-        public CallbackMiddleware(MegafonCallbackOptions options,
-            ILogger<CallbackMiddleware> logger = null)
+        public CallbackMiddleware(TOptions options, ILogger<CallbackMiddleware<TOptions>> logger = null)
         {
-            _options = options ?? throw new ArgumentNullException(nameof(options));
-            _logger = logger ?? new VoidLogger<CallbackMiddleware>();
+            _options = options;
+            _logger = logger ?? new VoidLogger<CallbackMiddleware<TOptions>>();
         }
 
         public async Task InvokeAsync(HttpContext context, string callbackToken)
         {
-
-            if (_options == null)
-            {
-                throw new ArgumentNullException(nameof(_options));
-            }
-
             if (context == null)
             {
                 throw new ArgumentNullException(nameof(context));
@@ -39,10 +34,19 @@ namespace Skytecs.MegafonPbxApiClient
                 return;
             }
 
-            if(context.Request.Form["crm_token"] != callbackToken)
+            try
             {
-                await SendResponse(context.Response, 401, "{ \"error\": \"Invalid token\" }");
+                var receivedToken = context.Request.Form["crm_token"].FirstOrDefault();
+                if (string.Compare(receivedToken, callbackToken, true) != 0)
+                {
+                    await SendResponse(context.Response, 401, "{ \"error\": \"Invalid token\" }");
 
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Invalid or unreadable Megafon callback token");
                 return;
             }
 
@@ -55,13 +59,13 @@ namespace Skytecs.MegafonPbxApiClient
                 switch (cmd)
                 {
                     case "history":
-                        await _options.InvokeOnHistory(new HistoryRequest(requestForm));
+                        await InvokeOnHistory(_options, new HistoryRequest(requestForm));
                         break;
                     case "event":
-                        await _options.InvokeOnEvent(new EventRequest(requestForm));
+                        await InvokeOnEvent(_options, new EventRequest(requestForm));
                         break;
                     case "contact":
-                        var contact = await _options.InvokeOnContact(new ContactRequest(requestForm));
+                        MegafonContact contact = await InvokeOnContact(_options, new ContactRequest(requestForm));
 
                         if (contact == null)
                         {
@@ -87,11 +91,63 @@ namespace Skytecs.MegafonPbxApiClient
             }
         }
 
+        protected abstract Task<MegafonContact> InvokeOnContact(TOptions options, ContactRequest request);
+        protected abstract Task InvokeOnEvent(TOptions options, EventRequest request);
+        protected abstract Task InvokeOnHistory(TOptions options, HistoryRequest request);
+
+
         private async Task SendResponse(HttpResponse response, int code, string json)
         {
             response.StatusCode = code;
             response.ContentType = "application/json";
             await response.WriteAsync(json);
+        }
+    }
+
+    class AdHocCallbackMiddleware : CallbackMiddleware<MegafonCallbackOptions>
+    {
+        public AdHocCallbackMiddleware(MegafonCallbackOptions options, ILogger<CallbackMiddleware<MegafonCallbackOptions>> logger = null) : base(options, logger)
+        {
+        }
+
+        protected override async Task<MegafonContact> InvokeOnContact(MegafonCallbackOptions options, ContactRequest request)
+        {
+            return await options.InvokeOnContact(request);
+        }
+
+        protected override async Task InvokeOnEvent(MegafonCallbackOptions options, EventRequest request)
+        {
+            await options.InvokeOnEvent(request);
+        }
+
+        protected override async Task InvokeOnHistory(MegafonCallbackOptions options, HistoryRequest request)
+        {
+            await options.InvokeOnHistory(request);
+        }
+    }
+
+    class BoundCallbackMiddleware<THandler> : CallbackMiddleware<MegafonCallbackOptions<THandler>>
+    {
+        private readonly THandler _handler;
+
+        public BoundCallbackMiddleware(THandler handler, MegafonCallbackOptions<THandler> options, ILogger<BoundCallbackMiddleware<THandler>> logger = null) : base(options, logger)
+        {
+            _handler = handler;
+        }
+
+        protected override Task<MegafonContact> InvokeOnContact(MegafonCallbackOptions<THandler> options, ContactRequest request)
+        {
+            return options.InvokeOnContact(_handler, request);
+        }
+
+        protected override Task InvokeOnEvent(MegafonCallbackOptions<THandler> options, EventRequest request)
+        {
+            return options.InvokeOnEvent(_handler, request);
+        }
+
+        protected override Task InvokeOnHistory(MegafonCallbackOptions<THandler> options, HistoryRequest request)
+        {
+            return options.InvokeOnHistory(_handler, request);
         }
     }
 }

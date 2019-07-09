@@ -18,9 +18,7 @@ namespace Skytecs.MegafonPbxApiClient
             CallId = requestForm["callid"].Single();
         }
 
-
         public string Phone { get; }
-
         public string CallId { get; }
     }
 }
